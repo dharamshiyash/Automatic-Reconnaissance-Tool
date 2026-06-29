@@ -8,10 +8,10 @@ config/smtp_config.txt
 smtp_config.txt
 
 # ── Runtime Output & Generated Reports ──────────────────────────────────────
-logs/
-reports/
-output/
-screenshots/
+/logs/
+/reports/
+/output/
+/screenshots/
 *.pdf
 *.html
 *.json

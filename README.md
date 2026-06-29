@@ -3,10 +3,6 @@
 # 🛡️ AUTOMATIC RECONNAISSANCE TOOL
 ### Professional Passive & Active OSINT Cybersecurity Framework
 
-<p align="center">
-  <img src="assets/logo/logo.png" alt="Automatic Reconnaissance Logo" height="100">
-</p>
-
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00e5ff.svg?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-4EAA25.svg?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/dharamshiyash/Automatic-Reconnaissance-Tool)

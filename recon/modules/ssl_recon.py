@@ -144,93 +144,106 @@ def run(target: str, timeout: int = 5) -> SslResult:
     with log_duration(logger, f"SSL/TLS analysis for {domain}"):
         try:
             ctx = ssl.create_default_context()
+            try:
+                import certifi
+                ctx.load_verify_locations(certifi.where())
+            except Exception:
+                pass
 
-            with socket.create_connection((domain, 443), timeout=timeout) as sock:
-                with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
-                    cert = ssock.getpeercert()
-                    result.raw_cert = cert
+            try:
+                sock = socket.create_connection((domain, 443), timeout=timeout)
+                ssock = ctx.wrap_socket(sock, server_hostname=domain)
+            except (ssl.SSLCertVerificationError, ssl.SSLError):
+                # Fallback to unverified context to inspect certificates if local store lacks root CA
+                ctx = ssl._create_unverified_context()
+                sock = socket.create_connection((domain, 443), timeout=timeout)
+                ssock = ctx.wrap_socket(sock, server_hostname=domain)
 
-                    # ── Connection info ───────────────────────────────
-                    result.tls_version = ssock.version()
-                    cipher_info = ssock.cipher()
-                    if cipher_info:
-                        result.cipher_suite = cipher_info[0]
-                        result.cipher_bits = cipher_info[2] if len(cipher_info) > 2 else None
+            with sock, ssock:
+                cert = ssock.getpeercert() or {}
+                result.raw_cert = cert
 
-                    # ── Certificate fields ────────────────────────────
-                    subject = cert.get("subject", ())
-                    result.subject = _extract_cn(subject)
+                # ── Connection info ───────────────────────────────
+                result.tls_version = ssock.version()
+                cipher_info = ssock.cipher()
+                if cipher_info:
+                    result.cipher_suite = cipher_info[0]
+                    result.cipher_bits = cipher_info[2] if len(cipher_info) > 2 else None
 
-                    issuer = cert.get("issuer", ())
-                    result.issuer = _extract_cn(issuer)
+                # ── Certificate fields ────────────────────────────
+                subject = cert.get("subject", ())
+                result.subject = _extract_cn(subject)
 
-                    result.serial_number = cert.get("serialNumber")
+                issuer = cert.get("issuer", ())
+                result.issuer = _extract_cn(issuer)
 
-                    # Check self-signed
-                    result.is_self_signed = result.subject == result.issuer
+                result.serial_number = cert.get("serialNumber")
 
-                    # Dates
-                    result.not_before = cert.get("notBefore")
-                    result.not_after = cert.get("notAfter")
+                # Check self-signed
+                result.is_self_signed = result.subject == result.issuer
 
-                    if result.not_after:
-                        try:
-                            expiry = datetime.datetime.strptime(
-                                result.not_after, "%b %d %H:%M:%S %Y %Z"
-                            )
-                            now = datetime.datetime.utcnow()
-                            delta = expiry - now
-                            result.days_until_expiry = delta.days
-                            result.is_expired = delta.days < 0
-                        except Exception:
-                            pass
+                # Dates
+                result.not_before = cert.get("notBefore")
+                result.not_after = cert.get("notAfter")
 
-                    # SAN
-                    san_entries = cert.get("subjectAltName", ())
-                    result.san = [value for _type, value in san_entries]
-
-                    # Certificate chain depth (from OCSP stapling info)
-                    caIssuers = cert.get("caIssuers", [])
-                    result.chain_depth = len(caIssuers) + 1  # Approximate
-
-                    # Signature algorithm (not directly in getpeercert,
-                    # but we can check via binary cert)
+                if result.not_after:
                     try:
-                        der = ssock.getpeercert(binary_form=True)
-                        if der:
-                            # Attempt to extract from DER-encoded cert
-                            import hashlib
-                            # Check common OIDs in the binary data
-                            der_hex = der.hex()
-                            if "2a864886f70d01010b" in der_hex:
-                                result.signature_algorithm = "sha256WithRSAEncryption"
-                            elif "2a864886f70d01010d" in der_hex:
-                                result.signature_algorithm = "sha512WithRSAEncryption"
-                            elif "2a864886f70d010105" in der_hex:
-                                result.signature_algorithm = "sha1WithRSAEncryption"
-                            elif "2a8648ce3d040302" in der_hex:
-                                result.signature_algorithm = "ecdsa-with-SHA256"
-                            elif "2a8648ce3d040303" in der_hex:
-                                result.signature_algorithm = "ecdsa-with-SHA384"
+                        expiry = datetime.datetime.strptime(
+                            result.not_after, "%b %d %H:%M:%S %Y %Z"
+                        )
+                        now = datetime.datetime.utcnow()
+                        delta = expiry - now
+                        result.days_until_expiry = delta.days
+                        result.is_expired = delta.days < 0
                     except Exception:
                         pass
 
-                    # ── Weak cipher detection ─────────────────────────
-                    if result.cipher_suite:
-                        for weak in WEAK_CIPHERS:
-                            if weak.lower() in result.cipher_suite.lower():
-                                result.has_weak_cipher = True
-                                result.weak_cipher_reason = (
-                                    f"Cipher suite contains weak algorithm: {weak}"
-                                )
-                                break
-                        if result.cipher_bits and result.cipher_bits < 128:
+                # SAN
+                san_entries = cert.get("subjectAltName", ())
+                result.san = [value for _type, value in san_entries]
+
+                # Certificate chain depth (from OCSP stapling info)
+                caIssuers = cert.get("caIssuers", [])
+                result.chain_depth = len(caIssuers) + 1  # Approximate
+
+                # Signature algorithm (not directly in getpeercert,
+                # but we can check via binary cert)
+                try:
+                    der = ssock.getpeercert(binary_form=True)
+                    if der:
+                        # Attempt to extract from DER-encoded cert
+                        import hashlib
+                        # Check common OIDs in the binary data
+                        der_hex = der.hex()
+                        if "2a864886f70d01010b" in der_hex:
+                            result.signature_algorithm = "sha256WithRSAEncryption"
+                        elif "2a864886f70d01010d" in der_hex:
+                            result.signature_algorithm = "sha512WithRSAEncryption"
+                        elif "2a864886f70d010105" in der_hex:
+                            result.signature_algorithm = "sha1WithRSAEncryption"
+                        elif "2a8648ce3d040302" in der_hex:
+                            result.signature_algorithm = "ecdsa-with-SHA256"
+                        elif "2a8648ce3d040303" in der_hex:
+                            result.signature_algorithm = "ecdsa-with-SHA384"
+                except Exception:
+                    pass
+
+                # ── Weak cipher detection ─────────────────────────
+                if result.cipher_suite:
+                    for weak in WEAK_CIPHERS:
+                        if weak.lower() in result.cipher_suite.lower():
                             result.has_weak_cipher = True
                             result.weak_cipher_reason = (
-                                f"Cipher key length is only {result.cipher_bits} bits"
+                                f"Cipher suite contains weak algorithm: {weak}"
                             )
+                            break
+                    if result.cipher_bits and result.cipher_bits < 128:
+                        result.has_weak_cipher = True
+                        result.weak_cipher_reason = (
+                            f"Cipher key length is only {result.cipher_bits} bits"
+                        )
 
-                    result.success = True
+                result.success = True
 
         except ssl.SSLError as exc:
             logger.warning("SSL error for %s: %s", domain, exc)

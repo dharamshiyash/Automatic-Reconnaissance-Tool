@@ -46,27 +46,30 @@ class SecurityScore:
 def _score_to_grade(score: int) -> str:
     if score >= 95:
         return "A+"
-    elif score >= 90:
+    elif score >= 88:
         return "A"
     elif score >= 80:
         return "B"
     elif score >= 70:
         return "C"
-    elif score >= 60:
+    elif score >= 55:
         return "D"
     else:
         return "F"
 
 
-def _score_to_risk(score: int) -> str:
-    if score >= 90:
-        return "Low"
-    elif score >= 75:
-        return "Medium"
-    elif score >= 55:
-        return "High"
-    else:
+def _score_to_risk(score: int, findings: list[Finding] = None) -> str:
+    has_critical = any(f.severity == "Critical" for f in (findings or []))
+    has_high = any(f.severity == "High" for f in (findings or []))
+    
+    if has_critical or score < 45:
         return "Critical"
+    elif has_high or score < 65:
+        return "High"
+    elif score < 80:
+        return "Medium"
+    else:
+        return "Low"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -94,32 +97,32 @@ def calculate(scan_results: dict[str, Any]) -> SecurityScore:
                 "Missing HSTS Header",
                 "The server does not set Strict-Transport-Security, "
                 "allowing downgrade attacks.",
-                "High", 10,
+                "Medium", 5,
             ),
             "Content-Security-Policy": (
                 "Missing Content Security Policy",
                 "No CSP header found. This increases XSS risk.",
-                "High", 10,
+                "Medium", 4,
             ),
             "X-Content-Type-Options": (
                 "Missing X-Content-Type-Options",
                 "Without nosniff, browsers may MIME-sniff responses.",
-                "Medium", 5,
+                "Low", 2,
             ),
             "X-Frame-Options": (
                 "Missing X-Frame-Options",
                 "The site may be vulnerable to clickjacking.",
-                "Medium", 5,
+                "Low", 2,
             ),
             "Referrer-Policy": (
                 "Missing Referrer-Policy",
                 "Referrer information may leak to third parties.",
-                "Low", 3,
+                "Informational", 1,
             ),
             "Permissions-Policy": (
                 "Missing Permissions-Policy",
                 "Browser features are not explicitly restricted.",
-                "Low", 3,
+                "Informational", 1,
             ),
             "X-XSS-Protection": (
                 "Missing X-XSS-Protection",
@@ -147,7 +150,7 @@ def calculate(scan_results: dict[str, Any]) -> SecurityScore:
                 findings.append(Finding(
                     title=f"Insecure Cookie: {cookie.name}",
                     description="Cookie lacks the Secure flag and may be sent over HTTP.",
-                    severity="Medium", points_deducted=3,
+                    severity="Low", points_deducted=1,
                     category="Cookies",
                 ))
                 ss.failed_checks += 1
@@ -261,7 +264,7 @@ def calculate(scan_results: dict[str, Any]) -> SecurityScore:
             findings.append(Finding(
                 title="No SPF Record",
                 description="No SPF record found. Email spoofing may be possible.",
-                severity="Medium", points_deducted=5,
+                severity="Medium", points_deducted=3,
                 category="DNS / Email Security",
             ))
             ss.failed_checks += 1
@@ -274,7 +277,7 @@ def calculate(scan_results: dict[str, Any]) -> SecurityScore:
             findings.append(Finding(
                 title="No DMARC Record",
                 description="No DMARC policy found. Email authentication is incomplete.",
-                severity="Medium", points_deducted=5,
+                severity="Medium", points_deducted=3,
                 category="DNS / Email Security",
             ))
             ss.failed_checks += 1
@@ -288,7 +291,7 @@ def calculate(scan_results: dict[str, Any]) -> SecurityScore:
             findings.append(Finding(
                 title="No CAA Record",
                 description="No CAA record limits which CAs can issue certificates.",
-                severity="Low", points_deducted=3,
+                severity="Informational", points_deducted=1,
                 category="DNS / Email Security",
             ))
             ss.failed_checks += 1
@@ -301,7 +304,7 @@ def calculate(scan_results: dict[str, Any]) -> SecurityScore:
             findings.append(Finding(
                 title="DNSSEC Not Enabled",
                 description="DNS responses are not cryptographically signed.",
-                severity="Low", points_deducted=3,
+                severity="Informational", points_deducted=1,
                 category="DNS / Email Security",
             ))
             ss.failed_checks += 1
